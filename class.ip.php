@@ -24,7 +24,7 @@ public function ipConnection(){
 	}
 
 
-   // $this->tableName'de Belirttiğilen Tablo Adında Bir Tablomuz Yok İse Tablo Oluşturuyor
+   // $this->tableName'de Belirtilen Tablo Adında Bir Tablomuz Yok İse Tablo Oluşturuyor
 	 $table_exists =$this->db->prepare( "DESCRIBE $this->tableName ");
 
 if ( !$table_exists->execute() ) {
