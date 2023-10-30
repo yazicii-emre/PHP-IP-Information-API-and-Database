@@ -1,140 +1,105 @@
 <?php
 
-// İp Sınıfımızı Dahil Ediyoruz.
+// Include our IP class
 require_once 'class.db.php';
 
-
 class ip extends db {
+    // Specify the table name to use
+    private $tableName = 'ip_api';
 
+    // This method will return an array of IP information if the API connection is successful
+    public function ipConnection() {
+        try {
+            // Fetch IP information from the IP-API service
+            $query = unserialize(file_get_contents("http://ip-api.com/php/{$this->get_client_ip()}?fields=124411"));
 
-// Oluşturulacak Tablo Adını Buraya Yazıyoruz.
-private $tableName='ipapi';
+            // Check if the API connection was successful
+            if ($query['status'] != 'success') {
+                throw new PDOException('API connection failed...');
+            }
 
+            // Check if the table exists, if not, create it
+            $table_exists = $this->db->prepare("DESCRIBE $this->tableName");
 
+            if (!$table_exists->execute()) {
+                $createTable = "CREATE TABLE $this->tableName (
+                    ip_id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    insert_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status VARCHAR(7) NOT NULL,
+                    country VARCHAR(25) NOT NULL,
+                    countryCode VARCHAR(5) NOT NULL,
+                    regionName VARCHAR(75) NOT NULL,
+                    city VARCHAR(75) NOT NULL,
+                    zip INT(10) NOT NULL,
+                    lat FLOAT(10) NOT NULL,
+                    lon FLOAT(10) NOT NULL,
+                    timezone VARCHAR(75) NOT NULL,
+                    org VARCHAR(75) NOT NULL,
+                    mobile ENUM('0', '1') DEFAULT '0',
+                    query VARCHAR(75) NOT NULL
+                )";
+                $isCreate = $this->db->exec($createTable);
+            }
 
-// Bu Metod , Eğer İp Api Bağlantısı Başarılı İse İp Bilgilerinin Olduğu Bir Dizi Değer Döndürecek
-public function ipConnection(){
+            return $query;
+        } catch (PDOException $e) {
+            return 'An error occurred! ' . $e->getMessage();
+        }
+    }
 
-	try {
+    // Use this method to perform IP record insertion/update
+    public function setIp() {
+        try {
+            $ipInfo = $this->ipConnection();
 
-	$query = unserialize(file_get_contents("http://ip-api.com/php/{$this->get_client_ip()}?fields=124411"));
+            if (is_array($ipInfo)) {
+                $select = $this->db->prepare("SELECT * FROM $this->tableName WHERE query=?");
+                $select->execute([$this->get_client_ip()]);
 
-	if ($query['status']!='success') {
-	throw new PDOException ('Api bağlantısı başarısız ...');
-	}
+                if (!$select->rowCount()) {
+                    // If the IP address is not in the database, insert a new record
+                    $stmt = $this->db->prepare("INSERT INTO $this->tableName SET
+                        status=?, country=?, countryCode=?, regionName=?, city=?, lat=?, lon=?, timezone=?, org=?, mobile=?, query=?
+                    ");
+                } else {
+                    // If the IP address is in the database and more than a month old, update the record
+                    $stmt = $this->db->prepare("UPDATE $this->tableName SET
+                        insert_time = NOW(),
+                        status=?, country=?, countryCode=?, regionName=?, city=?, lat=?, lon=?, timezone=?, org=?, mobile=?
+                        WHERE insert_time < DATE_SUB(NOW(), INTERVAL 1 MONTH) AND query=?
+                    ");
+                }
 
+                $stmt->execute([
+                    $ipInfo['status'], $ipInfo['country'], $ipInfo['countryCode'], $ipInfo['regionName'], $ipInfo['city'],
+                    $ipInfo['lat'], $ipInfo['lon'], $ipInfo['timezone'], $ipInfo['org'], $ipInfo['mobile'], $ipInfo['query']
+                ]);
+            } else {
+                echo $ipInfo;
+            }
+        } catch (PDOException $e) {
+            return $e->getMessage();
+        }
+    }
 
-   // $this->tableName'de Belirtilen Tablo Adında Bir Tablomuz Yok İse Tablo Oluşturuyor
-	 $table_exists =$this->db->prepare( "DESCRIBE $this->tableName ");
-
-if ( !$table_exists->execute() ) {
-
-	$createTable= "CREATE TABLE $this->tableName (
-	ip_id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-	insert_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	status VARCHAR(7) NOT NULL,
-	country VARCHAR(25) NOT NULL,
-	countryCode VARCHAR(5) NOT NULL,
-	regionName VARCHAR(75) NOT NULL,
-	city VARCHAR(75) NOT NULL,
-	zip INT(10) NOT NULL,
-	lat FLOAT(10) NOT NULL,
-	lon FLOAT(10) NOT NULL,
-	timezone VARCHAR(75) NOT NULL,
-	org VARCHAR(75) NOT NULL,
-	mobile ENUM('0','1') DEFAULT '0',
-	query VARCHAR(75) NOT NULL
-
-	)
-	";
-
-	$isCreate=$this->db->exec($createTable);
-
+    // Get the client's IP address
+    private function get_client_ip() {
+        $ipaddress = '';
+        if (getenv('HTTP_CLIENT_IP'))
+            $ipaddress = getenv('HTTP_CLIENT_IP');
+        elseif (getenv('HTTP_X_FORWARDED_FOR'))
+            $ipaddress = getenv('HTTP_X_FORWARDED_FOR');
+        elseif (getenv('HTTP_X_FORWARDED'))
+            $ipaddress = getenv('HTTP_X_FORWARDED');
+        elseif (getenv('HTTP_FORWARDED_FOR'))
+            $ipaddress = getenv('HTTP_FORWARDED_FOR');
+        elseif (getenv('HTTP_FORWARDED'))
+            $ipaddress = getenv('HTTP_FORWARDED');
+        elseif (getenv('REMOTE_ADDR'))
+            $ipaddress = getenv('REMOTE_ADDR');
+        else
+            $ipaddress = 'UNKNOWN';
+        return $ipaddress;
+    }
 }
-
-
-	return $query;
-
-	}catch (PDOException $e) {
-
-		return 'Bir hata oluştu! '.$e->getMessage();
-	}
-
-
-}
-
-
-// Bu Metodu Çağırarak İp Kayıt/Güncelleme İşlemlerini Gerçekleştiriyoruz
-public function setIp() {
-
-	try {
-
-	if (is_array($this->ipConnection())) {
-
-		$select=$this->db->prepare("SELECT * FROM $this->tableName WHERE query=?");
-		$select->execute([ $this->get_client_ip() ]);
-
-
-		if (!$select->rowCount()) {
-
-			// İp Adresi Kayıtlı Değilse Kayıt İşlemi Gerçekleşiyor
-        $stmt=$this->db->prepare("INSERT INTO $this->tableName SET
-        status=? ,country=?, countryCode=?, regionName=?,city=?, lat=?,lon=?,timezone=?,org=?,mobile=?,query=?
-        ");
-
-		}else {
-
-// İp Adresi Kayıtlı İse Ve Kayıt Üzerinden 1 Hafta Geçmiş İse Güncelleme İşlemi Gerçekleşiyor
-			$stmt=$this->db->prepare("UPDATE $this->tableName SET
-			insert_time={date('Y-m-d H:i:s')},status=? ,country=?, countryCode=?, regionName=?,city=?, lat=?,lon=?,timezone=?,org=?,mobile=? where insert_time < DATE_SUB(Now(),INTERVAL 1 MONTH) and  query=?
-			");
-
-		}
-
-
-		$stmt->execute( [
-  $this->ipConnection()['status'],$this->ipConnection()['country'],$this->ipConnection()['countryCode'],$this->ipConnection()['regionName'],$this->ipConnection()['city'],
-	$this->ipConnection()['lat'],$this->ipConnection()['lon'],$this->ipConnection()['timezone'],$this->ipConnection()['org'],$this->ipConnection()['mobile'],
-	$this->ipConnection()['query']
-
-			] );
-
-
-	}else {
-		echo $this->ipConnection();
-	}
-
-
-	}catch (PDOException $e) {
-		return $e->getMessage();
-	}
-
-}
-
-
-
-// İp Adresini Döndürüyor.
- private function get_client_ip() {
-    $ipaddress = '';
-    if ( getenv( 'HTTP_CLIENT_IP' ) )
-      $ipaddress = getenv( 'HTTP_CLIENT_IP' );
-    else if ( getenv( 'HTTP_X_FORWARDED_FOR' ) )
-      $ipaddress = getenv( 'HTTP_X_FORWARDED_FOR' );
-    else if ( getenv( 'HTTP_X_FORWARDED' ) )
-      $ipaddress = getenv( 'HTTP_X_FORWARDED' );
-    else if ( getenv( 'HTTP_FORWARDED_FOR' ) )
-      $ipaddress = getenv( 'HTTP_FORWARDED_FOR' );
-    else if ( getenv( 'HTTP_FORWARDED' ) )
-      $ipaddress = getenv( 'HTTP_FORWARDED' );
-    else if ( getenv( 'REMOTE_ADDR' ) )
-      $ipaddress = getenv( 'REMOTE_ADDR' );
-    else
-      $ipaddress = 'UNKNOWN';
-    return $ipaddress;
-  }
-
-
-
-}
-
 ?>
